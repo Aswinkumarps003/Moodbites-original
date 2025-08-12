@@ -1,0 +1,31 @@
+{
+  "name": "mood-analysis-service",
+  "version": "1.0.0",
+  "description": "Mood-based recipe recommendation service using FastAPI and Spoonacular",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node testRecipes.js",
+    "test-api": "node testApiKey.js",
+    "fastapi": "python app.py"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "dotenv": "^16.3.1"
+  },
+  "keywords": [
+    "mood",
+    "recipes",
+    "spoonacular",
+    "fastapi",
+    "food-recommendations"
+  ],
+  "author": "MoodBites Team",
+  "license": "MIT"
+}

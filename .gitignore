@@ -6,3 +6,6 @@
 ./food-service/.env
 ./frontend/node_modules/
 ./frontend/.env
+./chat-service/node_modules/
+./chat-service/.env
+./api keys.txt 

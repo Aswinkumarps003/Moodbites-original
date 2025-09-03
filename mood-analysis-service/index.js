@@ -1,6 +1,7 @@
 // index.js - Main integration script for mood-based recipe recommendations
 import { getRecipesByMood, getRecipesByMoodWithPreferences } from "./fetchRecipes.js";
 import dotenv from "dotenv";
+import { fileURLToPath } from "url";
 
 // Load environment variables
 dotenv.config();
@@ -96,9 +97,18 @@ async function main() {
   }
 }
 
-// Run if this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main();
+// Run if this file is executed directly (robust on Windows paths with spaces)
+try {
+  const isDirectRun = process.argv[1]
+    && fileURLToPath(import.meta.url) === process.argv[1];
+  if (isDirectRun) {
+    main();
+  }
+} catch (_err) {
+  // Fallback: if detection fails, allow --demo flag to force run
+  if (process.argv.includes("--demo")) {
+    main();
+  }
 }
 
 export { main };

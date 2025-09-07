@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node testRecipes.js",
+    "test-comprehensive": "node testComprehensiveService.js",
     "test-api": "node testApiKey.js",
     "fastapi": "python app.py"
   },

@@ -58,7 +58,40 @@ const dietSchema = new mongoose.Schema({
   generatedPlan: { type: mongoose.Schema.Types.Mixed, default: null },
 }, { timestamps: true });
 
+// Diet Plan Collection Schema - stores generated diet plans from Spoonacular
+const dietPlanSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  dietId: { type: mongoose.Schema.Types.ObjectId, ref: 'Diet', required: true },
+  planName: { type: String, default: 'My Diet Plan' },
+  totalCalories: { type: String, required: true },
+  meals: [{
+    mealType: { type: String, required: true }, // Breakfast, Lunch, Dinner, Snack1, Snack2
+    recipe: { type: String, required: true },
+    calories: { type: Number, required: true },
+    ingredients: [{ type: String }],
+    spoonacularId: { type: Number }, // Store Spoonacular recipe ID for future reference
+    image: { type: String }, // Recipe image URL
+    readyInMinutes: { type: Number }, // Cooking time
+    servings: { type: Number, default: 1 },
+    nutrition: {
+      protein: { type: Number },
+      carbs: { type: Number },
+      fat: { type: Number },
+      fiber: { type: Number },
+      sugar: { type: Number }
+    }
+  }],
+  preferences: {
+    dietPreference: { type: String },
+    cuisine: [{ type: String }],
+    healthConditions: [{ type: String }]
+  },
+  isActive: { type: Boolean, default: true },
+  generatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
 const Diet = mongoose.model('Diet', dietSchema);
+const DietPlan = mongoose.model('DietPlan', dietPlanSchema);
 
 // Routes
 app.post('/api/diet-planner', async (req, res) => {
@@ -148,30 +181,58 @@ async function fetchSpoonacularRecipes(dietDoc) {
   return Array.isArray(data.results) ? data.results : [];
 }
 
-// Helper: create simple diet plan from Spoonacular recipes
-async function createSimpleDietPlan(recipes, dietDoc) {
-  // Simple meal assignment based on recipe order
+// Helper: create detailed diet plan from Spoonacular recipes
+async function createDetailedDietPlan(recipes, dietDoc) {
   const meals = ['Breakfast', 'Snack1', 'Lunch', 'Snack2', 'Dinner'];
   const plan = {};
+  const mealDetails = [];
   
   recipes.forEach((recipe, index) => {
     const mealName = meals[index] || 'Dinner';
+    
+    // Extract nutrition data
+    const nutrition = recipe.nutrition?.nutrients || [];
+    const calories = nutrition.find(n => n.name === 'Calories')?.amount || 0;
+    const protein = nutrition.find(n => n.name === 'Protein')?.amount || 0;
+    const carbs = nutrition.find(n => n.name === 'Carbohydrates')?.amount || 0;
+    const fat = nutrition.find(n => n.name === 'Fat')?.amount || 0;
+    const fiber = nutrition.find(n => n.name === 'Fiber')?.amount || 0;
+    const sugar = nutrition.find(n => n.name === 'Sugar')?.amount || 0;
+    
+    // Create meal object for database storage
+    const mealData = {
+      mealType: mealName,
+      recipe: recipe.title,
+      calories: Math.round(calories),
+      ingredients: recipe.nutrition?.ingredients?.map(i => i.name) || [],
+      spoonacularId: recipe.id,
+      image: recipe.image,
+      readyInMinutes: recipe.readyInMinutes || 30,
+      servings: recipe.servings || 1,
+      nutrition: {
+        protein: Math.round(protein),
+        carbs: Math.round(carbs),
+        fat: Math.round(fat),
+        fiber: Math.round(fiber),
+        sugar: Math.round(sugar)
+      }
+    };
+    
+    mealDetails.push(mealData);
+    
+    // Also create the simple format for backward compatibility
     plan[mealName] = {
       recipe: recipe.title,
-      calories: recipe.nutrition?.nutrients?.find(n => n.name === 'Calories')?.amount || 'N/A',
+      calories: Math.round(calories),
       ingredients: recipe.nutrition?.ingredients?.map(i => i.name) || []
     };
   });
   
   // Calculate total calories
-  const totalCalories = Object.values(plan).reduce((sum, meal) => {
-    const calories = typeof meal.calories === 'number' ? meal.calories : 0;
-    return sum + calories;
-  }, 0);
-  
+  const totalCalories = mealDetails.reduce((sum, meal) => sum + meal.calories, 0);
   plan.TotalCalories = `${totalCalories} kcal`;
   
-  return plan;
+  return { plan, mealDetails, totalCalories };
 }
 
 // Generate via Spoonacular only
@@ -200,18 +261,130 @@ app.post('/api/diet-planner/generate/:userId', async (req, res) => {
       return res.status(502).json({ message: 'No recipes found from Spoonacular' });
     }
 
-    console.log('Creating simple diet plan...');
-    const plan = await createSimpleDietPlan(recipes, dietDoc);
+    console.log('Creating detailed diet plan...');
+    const { plan, mealDetails, totalCalories } = await createDetailedDietPlan(recipes, dietDoc);
     console.log('Generated plan:', plan);
     
+    // Save to DietPlan collection
+    const dietPlan = new DietPlan({
+      userId: userId,
+      dietId: dietDoc._id,
+      planName: `Diet Plan - ${new Date().toLocaleDateString()}`,
+      totalCalories: `${totalCalories} kcal`,
+      meals: mealDetails,
+      preferences: {
+        dietPreference: dietDoc.dietPreference,
+        cuisine: dietDoc.cuisine,
+        healthConditions: dietDoc.conditions
+      },
+      isActive: true,
+      generatedAt: new Date()
+    });
+    
+    await dietPlan.save();
+    console.log('Diet plan saved to DietPlan collection');
+    
+    // Also update the original Diet document for backward compatibility
     dietDoc.generatedPlan = plan;
     await dietDoc.save();
-    console.log('Plan saved to database');
+    console.log('Plan also saved to Diet collection for backward compatibility');
 
-    res.json({ success: true, plan });
+    res.json({ 
+      success: true, 
+      plan,
+      dietPlanId: dietPlan._id,
+      message: 'Diet plan generated and saved successfully'
+    });
   } catch (err) {
     console.error('Diet plan generation error:', err);
     res.status(500).json({ message: 'Failed to generate diet plan', error: err.message });
+  }
+});
+
+// Get all diet plans for a user
+app.get('/api/diet-plans/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const dietPlans = await DietPlan.find({ userId, isActive: true })
+      .sort({ createdAt: -1 })
+      .populate('dietId', 'activity goals dietPreference cuisine');
+    
+    res.json({ 
+      success: true, 
+      count: dietPlans.length, 
+      dietPlans 
+    });
+  } catch (err) {
+    console.error('Fetch diet plans error:', err);
+    res.status(500).json({ message: 'Failed to fetch diet plans', error: err.message });
+  }
+});
+
+// Get a specific diet plan by ID
+app.get('/api/diet-plans/detail/:planId', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const dietPlan = await DietPlan.findById(planId)
+      .populate('dietId', 'activity goals dietPreference cuisine conditions');
+    
+    if (!dietPlan) {
+      return res.status(404).json({ message: 'Diet plan not found' });
+    }
+    
+    res.json({ 
+      success: true, 
+      dietPlan 
+    });
+  } catch (err) {
+    console.error('Fetch diet plan detail error:', err);
+    res.status(500).json({ message: 'Failed to fetch diet plan', error: err.message });
+  }
+});
+
+// Deactivate a diet plan (soft delete)
+app.patch('/api/diet-plans/:planId/deactivate', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const dietPlan = await DietPlan.findByIdAndUpdate(
+      planId, 
+      { isActive: false }, 
+      { new: true }
+    );
+    
+    if (!dietPlan) {
+      return res.status(404).json({ message: 'Diet plan not found' });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Diet plan deactivated successfully',
+      dietPlan 
+    });
+  } catch (err) {
+    console.error('Deactivate diet plan error:', err);
+    res.status(500).json({ message: 'Failed to deactivate diet plan', error: err.message });
+  }
+});
+
+// Get active diet plan for a user
+app.get('/api/diet-plans/:userId/active', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const activeDietPlan = await DietPlan.findOne({ userId, isActive: true })
+      .sort({ createdAt: -1 })
+      .populate('dietId', 'activity goals dietPreference cuisine conditions');
+    
+    if (!activeDietPlan) {
+      return res.status(404).json({ message: 'No active diet plan found' });
+    }
+    
+    res.json({ 
+      success: true, 
+      dietPlan: activeDietPlan 
+    });
+  } catch (err) {
+    console.error('Fetch active diet plan error:', err);
+    res.status(500).json({ message: 'Failed to fetch active diet plan', error: err.message });
   }
 });
 

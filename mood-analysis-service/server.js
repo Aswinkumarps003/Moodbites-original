@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3001;
 const API_KEY = process.env.SPOONACULAR_API_KEY;
 const A = process.env.hi;
 console.log(API_KEY);
-console.log(A);
+
 // Middleware
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],

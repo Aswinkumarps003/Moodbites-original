@@ -18,7 +18,7 @@
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.6.1"
   },
   "keywords": [
     "mood",

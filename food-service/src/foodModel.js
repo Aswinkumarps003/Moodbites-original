@@ -24,7 +24,7 @@ class FoodModel {
       }
       
       // Filter active recipes by default (unless explicitly requested)
-      if (filters.include_inactive !== true) {
+      if (filters.include_inactive !== 'true' && filters.include_inactive !== true) {
         query = query.eq('is_active', true);
       }
 

@@ -37,7 +37,8 @@ const getAllDishes = async (req, res) => {
       mood: req.query.mood,
       user_id: req.query.user_id,
       difficulty: req.query.difficulty,
-      search: req.query.search
+      search: req.query.search,
+      include_inactive: req.query.include_inactive
     };
 
     const dishes = await FoodModel.getAllDishes(filters);

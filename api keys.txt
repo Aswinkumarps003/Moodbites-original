@@ -2,3 +2,5 @@ openai = "sk-or-v1-ab5d4bfede1a953f2ee4cdbe94c5f9dd22b0a8e5361d6e6a096d00b51e707
 GEMINI_API_KEY="AIzaSyC5URQm8_VmFcTNG2K8KOlADnWEOwwyJEI" in chat-service powershell
 $env:SPOONACULAR_API_KEY = "ba245a1ad39e48058eb12417eb66288a" in mood-analysis fetch folder powershell
 ,"Muscle Gain","Workout and Yoga" later add it 
+@DietPlanView.jsx  fix the styling of the ingredient checklist and avoid the marking of the ingredients just list the ingredients to make it and style to a professional and enbale the back feature of the ingredients list and when i mark it as complete i want to not show it on the diet plan and dont remove it from the mongodb @diet-service/  dietplans 
+prompt for dietplan styling

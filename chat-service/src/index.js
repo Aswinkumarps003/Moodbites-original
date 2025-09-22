@@ -50,19 +50,29 @@ io.on("connection", (socket) => {
     try {
       const { senderId, receiverId, message, messageType = "text" } = data;
 
-      // Find or create conversation
-      let conversation = await Conversation.findOne({
-        participants: { $all: [senderId, receiverId] },
-      });
+      // Find or create conversation using the correct query structure
+      let conversation = await Conversation.findOneAndUpdate(
+        { 
+          participants: { 
+            $all: [senderId, receiverId] 
+          }
+        },
+        { 
+          $setOnInsert: { 
+            participants: [senderId, receiverId],
+            messages: [],
+            lastMessage: "",
+            lastUpdated: new Date()
+          }
+        },
+        { 
+          upsert: true, 
+          new: true, 
+          setDefaultsOnInsert: true 
+        }
+      );
 
-      if (!conversation) {
-        conversation = new Conversation({
-          participants: [senderId, receiverId],
-          messages: [],
-        });
-      }
-
-      // Add message to conversation
+      // Create new message object
       const newMessage = {
         senderId,
         receiverId,
@@ -72,6 +82,7 @@ io.on("connection", (socket) => {
         isRead: false,
       };
 
+      // Add message to conversation and update
       conversation.messages.push(newMessage);
       conversation.lastMessage = message;
       conversation.lastUpdated = new Date();
@@ -105,8 +116,13 @@ io.on("connection", (socket) => {
       const conversation = await Conversation.findById(conversationId);
       if (!conversation) return;
 
-      const message = conversation.messages.id(messageId);
-      if (message && message.receiverId.toString() === userId) {
+      // Find the message in the embedded messages array
+      const message = conversation.messages.find(msg => 
+        msg._id.toString() === messageId && 
+        msg.receiverId.toString() === userId
+      );
+      
+      if (message) {
         message.isRead = true;
         await conversation.save();
 
@@ -162,14 +178,13 @@ app.get("/api/conversations/:userId", async (req, res) => {
 app.get("/api/conversations/:conversationId/messages", async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const conversation = await Conversation.findById(conversationId)
-      .populate("messages.senderId", "name email")
-      .populate("messages.receiverId", "name email");
+    const conversation = await Conversation.findById(conversationId);
 
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found" });
     }
 
+    // Return the embedded messages array
     res.json(conversation.messages);
   } catch (error) {
     console.error("❌ Error fetching messages:", error);
@@ -178,7 +193,7 @@ app.get("/api/conversations/:conversationId/messages", async (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3005;
+const PORT = process.env.PORT || 3006;
 
 const startServer = async () => {
   await connectDB();

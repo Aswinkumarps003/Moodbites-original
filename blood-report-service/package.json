@@ -1,0 +1,36 @@
+{
+  "name": "blood-report-service",
+  "version": "1.0.0",
+  "description": "Blood report OCR and analysis service for MoodBites",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index-simple.js",
+    "dev": "nodemon index-simple.js",
+    "start-full": "node index.js"
+  },
+  "dependencies": {
+    "cloudinary": "^1.41.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jimp": "^0.22.10",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^7.8.7",
+    "multer": "^1.4.5-lts.1",
+    "pdf2pic": "^2.1.4",
+    "tesseract.js": "^4.1.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "blood-report",
+    "ocr",
+    "medical",
+    "analysis",
+    "health"
+  ],
+  "author": "MoodBites Team",
+  "license": "MIT"
+}

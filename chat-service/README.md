@@ -36,7 +36,7 @@ Create a `.env` file with:
 MONGODB_URI=mongodb://localhost:27017/moodbites_chat
 
 # Server Configuration
-PORT=3005
+PORT=3006
 
 # Frontend URL for CORS
 FRONTEND_URL=http://localhost:3000
@@ -91,7 +91,7 @@ npm start
 
 ```javascript
 // Frontend connection
-const socket = io('http://localhost:3005');
+const socket = io('http://localhost:3006');
 
 // Join user room
 socket.emit('join-room', userId);

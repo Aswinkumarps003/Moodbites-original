@@ -1,10 +1,9 @@
 import io
 import base64
-import requests
+import re
 import pytesseract
 from PIL import Image, ImageEnhance
 from flask import Flask, request, jsonify
-from werkzeug.exceptions import BadRequest
 
 # Conditionally import pdf2image for PDF support
 try:
@@ -14,23 +13,36 @@ except ImportError:
     _PDF2IMAGE_AVAILABLE = False
 
 # --- Configuration ---
-# Set the path to the Tesseract executable.
-# For Windows, it might be: pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# For macOS (with Homebrew): pytesseract.pytesseract.tesseract_cmd = r'/usr/local/bin/tesseract'
-# If Tesseract is in your system's PATH, this line is not needed.
+# Set this to your Tesseract executable path if not on PATH
+# Windows example:
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Flask App Initialization
 app = Flask(__name__)
+
+# --- Keyword Validation Setup (Tiered, Weighted) ---
+TIER_1_KEYWORDS = {
+    'lipid profile': 15, 'serum cholesterol': 15, 'serum triglycerides': 15,
+    'serum hdl': 15, 'serum ldl': 15, 'vldl': 10, 'blood sugar (fasting)': 15,
+    'biological reference range': 10, 'observed value': 10,
+    'name of investigation': 10, 'mg/dl': 15
+}
+TIER_2_KEYWORDS = {
+    'biochemistry': 8, 'serum': 5, 'fasting': 5, 'normal:': 5, 'high:': 5,
+    'borderline high': 5, 'ratio': 5, 'lab technician': 5, 'final report': 5,
+    'hemoglobin': 7, 'platelets': 7, 'glucose': 7, 'rbc': 5, 'wbc': 5
+}
+TIER_3_KEYWORDS = {
+    'laboratory': 3, 'lab': 3, 'medical': 2, 'patient name': 3, 'name': 2,
+    'gender & age': 3, 'bill no.': 3, 'bill date': 3, 'collected on': 3,
+    'report on': 3, 'referred by': 2, 'approved by': 2
+}
+CONFIDENCE_THRESHOLD = 40  # Minimum weighted score to consider valid report
 
 def _preprocess_image(img: Image.Image) -> Image.Image:
     """Basic preprocessing to improve OCR results."""
-    # Convert to grayscale
     img = img.convert('L')
-    # Increase contrast
     enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(1.5)
-    # Increase sharpness
+    img = enhancer.enhance(1.8)
     enhancer = ImageEnhance.Sharpness(img)
     img = enhancer.enhance(2.0)
     return img
@@ -42,99 +54,110 @@ def _extract_text_from_image(img: Image.Image) -> str:
 
 def validate_blood_report(extracted_text: str) -> dict:
     """
-    Validates if the extracted text content is likely a blood report.
-    Returns a confidence score and a boolean flag.
+    Validates if the extracted text is a blood report using a weighted keyword scoring system
+    and tiered heuristics.
     """
     text_lower = extracted_text.lower()
-    
-    # 1. Keyword Analysis
-    medical_keywords = [
-        'hemoglobin', 'platelets', 'glucose', 'cholesterol', 'rbc', 'wbc',
-        'liver function test', 'renal function test', 'thyroid', 'cbc',
-        'lipid panel', 'serum', 'plasma', 'bilirubin', 'creatinine',
-        'urea', 'sgot', 'sgpt', 'mg/dl', 'g/dl', 'k/ul'
-    ]
-    found_keywords = [keyword for keyword in medical_keywords if keyword in text_lower]
-    keyword_confidence = (len(found_keywords) / len(medical_keywords)) * 100
-    
-    # 2. Semantic Understanding (Simplified)
-    # Check for common patterns like "Test: Value" or "Test Value Unit"
-    has_value_pattern = any(
-        re.search(r'(\w+):\s*(\d+\.?\d*)', extracted_text) or
-        re.search(r'(\w+)\s+(\d+\.?\d*)\s+(mg/dl|g/dl|k/ul)', extracted_text, re.IGNORECASE)
-        for re in [__import__('re')]
-    )
-    semantic_confidence = 50 if has_value_pattern else 0
+    score = 0
+    found = set()
 
-    # 3. Lab/Hospital Name Check (Simplified)
-    lab_keywords = ['lab', 'laboratory', 'medical', 'center', 'hospital', 'clinic', 'diagnostics']
-    has_lab_name = any(keyword in text_lower for keyword in lab_keywords)
-    lab_confidence = 50 if has_lab_name else 0
-    
-    # Calculate total confidence score (simple weighted average)
-    total_confidence = (keyword_confidence * 0.5) + (semantic_confidence * 0.25) + (lab_confidence * 0.25)
-    
-    # Return a success flag if confidence is above a certain threshold, e.g., 20%
-    is_likely_report = total_confidence > 5  # Lowered threshold for better flexibility
+    # Weighted scoring
+    for keyword, weight in TIER_1_KEYWORDS.items():
+        if keyword in text_lower:
+            score += weight
+            found.add(keyword)
+    for keyword, weight in TIER_2_KEYWORDS.items():
+        if keyword in text_lower:
+            score += weight
+            found.add(keyword)
+    for keyword, weight in TIER_3_KEYWORDS.items():
+        if keyword in text_lower:
+            score += weight
+            found.add(keyword)
+
+    # Heuristics: ensure core blood-report signal
+    # Count occurrences per tier for core rule
+    tier1_hits = sum(1 for k in TIER_1_KEYWORDS if k in text_lower)
+    tier2_hits = sum(1 for k in TIER_2_KEYWORDS if k in text_lower)
+    passes_core = tier1_hits >= 2 or (tier1_hits >= 1 and tier2_hits >= 3)
+
+    is_likely_report = (score >= CONFIDENCE_THRESHOLD) and passes_core
+
+    reason = (
+        f"Confidence score {score} >= {CONFIDENCE_THRESHOLD} with core keyword signal."
+        if is_likely_report else
+        f"Score {score} below {CONFIDENCE_THRESHOLD} or insufficient core keywords."
+    )
 
     return {
         "isLikelyReport": is_likely_report,
-        "totalConfidence": total_confidence,
-        "foundKeywords": found_keywords,
+        "confidenceScore": score,
+        "foundKeywords": sorted(list(found)),
+        "reason": reason
     }
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({"status": "ok"})
 
 @app.route('/extract-text', methods=['POST'])
 def extract_text_endpoint():
     try:
-        data = request.get_json(silent=True)
+        data = request.get_json()
         if not data or 'image_data' not in data:
             return jsonify({"success": False, "reason": "Missing 'image_data' in request body."}), 400
 
-        image_data = data.get('image_data')
+        image_data = data['image_data']
+        if ',' not in image_data:
+            return jsonify({"success": False, "reason": "Invalid data URL format."}), 400
+
+        header, encoded_data = image_data.split(',', 1)
+        try:
+            file_bytes = base64.b64decode(encoded_data)
+        except Exception:
+            return jsonify({"success": False, "reason": "Base64 decode failed."}), 400
         
         extracted_text = ""
-        # Handle Base64 encoded image
-        if image_data.startswith('data:image'):
-            header, encoded_data = image_data.split(',', 1)
-            file_bytes = base64.b64decode(encoded_data)
-            img = Image.open(io.BytesIO(file_bytes))
-            extracted_text = _extract_text_from_image(img)
-        # Handle PDF (requires pdf2image)
-        elif image_data.lower().endswith('.pdf'):
+
+        # PDF (base64 data URL)
+        if 'application/pdf' in header:
             if not _PDF2IMAGE_AVAILABLE:
-                return jsonify({"success": False, "reason": "PDF support not installed. Please install pdf2image dependencies."}), 501
-            resp = requests.get(image_data, timeout=30)
-            resp.raise_for_status()
-            pages = convert_from_bytes(resp.content, dpi=300, first_page=1, last_page=1)
+                return jsonify({"success": False, "reason": "PDF processing dependencies not installed on server."}), 501
+            pages = convert_from_bytes(file_bytes, dpi=300)
             if not pages:
                 return jsonify({"success": False, "reason": "Unable to read PDF pages."}), 400
             extracted_text = _extract_text_from_image(pages[0])
-        else:
-            # Assume it's an image URL
-            resp = requests.get(image_data, timeout=30)
-            resp.raise_for_status()
-            img = Image.open(io.BytesIO(resp.content))
+
+        # Image (png/jpg/jpeg, base64 data URL)
+        elif 'image' in header:
+            try:
+                img = Image.open(io.BytesIO(file_bytes))
+            except Exception:
+                return jsonify({"success": False, "reason": "Unable to decode image bytes."}), 400
             extracted_text = _extract_text_from_image(img)
 
-        validation_result = validate_blood_report(extracted_text)
-        
-        # Always return the extracted text, but with validation status
+        else:
+            return jsonify({"success": False, "reason": "Unsupported file type in data URL."}), 400
+
+        if not extracted_text or not extracted_text.strip():
+            return jsonify({
+                "success": False,
+                "text": "",
+                "validation": {
+                    "isLikelyReport": False,
+                    "confidenceScore": 0,
+                    "reason": "OCR could not extract any text from the file."
+                }
+            })
+
+        validation = validate_blood_report(extracted_text)
+
         return jsonify({
-            "success": validation_result["isLikelyReport"],
-            "reason": "Document validated as a blood report." if validation_result["isLikelyReport"] else "The uploaded file does not appear to be a blood report.",
+            "success": validation["isLikelyReport"],
             "text": extracted_text,
-            "validation": validation_result,
-            "confidence": validation_result["totalConfidence"],
-            "foundKeywords": validation_result["foundKeywords"]
+            "validation": validation
         })
 
     except Exception as e:
         app.logger.error(f"Error processing request: {e}")
-        return jsonify({"success": False, "reason": f"An unexpected error occurred: {str(e)}"}), 500
+        return jsonify({"success": False, "reason": str(e)}), 500
 
 if __name__ == "__main__":
-    print("🚀 Starting Python OCR Fl
+    print("🚀 Starting Python OCR Flask server with keyword validation on http://localhost:5001")
+    app.run(host='0.0.0.0', port=5001, debug=True)

@@ -3,6 +3,7 @@
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "livekit-server-sdk": "^2.13.3",
     "mongoose": "^8.18.0",
     "nodemon": "^3.1.10"
   }

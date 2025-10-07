@@ -11,13 +11,53 @@ import cors from 'cors';
 // Load environment variables from .env file
 dotenv.config();
 
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
 // Initialize Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
 
 // Use CORS middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Import multer for file uploads
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { v2 as cloudinary } from 'cloudinary';
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = 'uploads';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 16 * 1024 * 1024 // 16MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow all file types for now
+    cb(null, true);
+  }
+});
 
 // Get MongoDB URI from environment variables
 const mongoURI = process.env.MONGODB_URI;
@@ -50,8 +90,34 @@ const messageSchema = new mongoose.Schema({
   },
   messageType: {
     type: String,
-    enum: ["text", "image", "file"],
+    enum: ["text", "image", "file", "audio"],
     default: "text",
+  },
+  // File-related fields
+  fileName: {
+    type: String,
+  },
+  fileSize: {
+    type: Number,
+  },
+  fileType: {
+    type: String,
+  },
+  fileUrl: {
+    type: String,
+  },
+  filePublicId: {
+    type: String, // Cloudinary public ID for file management
+  },
+  // Audio-specific fields
+  audioUrl: {
+    type: String,
+  },
+  audioPublicId: {
+    type: String, // Cloudinary public ID for audio management
+  },
+  audioDuration: {
+    type: Number,
   },
   createdAt: {
     type: Date,
@@ -120,6 +186,16 @@ io.on('connection', (socket) => {
         messageType: data.messageType,
         createdAt: new Date(),
         isRead: false,
+        // File-related fields
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        fileType: data.fileType,
+        fileUrl: data.fileUrl,
+        filePublicId: data.filePublicId,
+        // Audio-specific fields
+        audioUrl: data.audioUrl,
+        audioPublicId: data.audioPublicId,
+        audioDuration: data.audioDuration,
       };
 
       // Step 1: Find existing conversation
@@ -261,6 +337,118 @@ app.get('/api/conversations/:conversationId/stats', async (req, res) => {
     res.status(500).json({ message: 'Error fetching conversation stats', error });
   }
 });
+
+// File upload endpoints with Cloudinary
+app.post('/api/upload/audio', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: 'video', // Cloudinary treats audio as video
+      folder: 'moodbites/audio',
+      use_filename: true,
+      unique_filename: true,
+      overwrite: false
+    });
+
+    // Clean up local file
+    fs.unlinkSync(req.file.path);
+
+    const duration = 0; // You can use ffmpeg or similar to get actual duration
+    
+    res.json({
+      audioUrl: result.secure_url,
+      publicId: result.public_id,
+      duration,
+      fileName: req.file.originalname,
+      fileSize: req.file.size
+    });
+  } catch (error) {
+    console.error('Error uploading audio to Cloudinary:', error);
+    // Clean up local file if upload failed
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Failed to upload audio' });
+  }
+});
+
+app.post('/api/upload/file', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    const fileType = req.body.fileType || 'other';
+    let resourceType = 'auto';
+    let folder = 'moodbites/files';
+
+    // Determine resource type and folder based on file type
+    if (fileType === 'image') {
+      resourceType = 'image';
+      folder = 'moodbites/images';
+    } else if (fileType === 'video') {
+      resourceType = 'video';
+      folder = 'moodbites/videos';
+    } else if (fileType === 'audio') {
+      resourceType = 'video'; // Cloudinary treats audio as video
+      folder = 'moodbites/audio';
+    }
+
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: resourceType,
+      folder: folder,
+      use_filename: true,
+      unique_filename: true,
+      overwrite: false
+    });
+
+    // Clean up local file
+    fs.unlinkSync(req.file.path);
+    
+    res.json({
+      fileUrl: result.secure_url,
+      publicId: result.public_id,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType
+    });
+  } catch (error) {
+    console.error('Error uploading file to Cloudinary:', error);
+    // Clean up local file if upload failed
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Failed to upload file' });
+  }
+});
+
+// Delete file from Cloudinary
+app.delete('/api/upload/delete/:publicId', async (req, res) => {
+  try {
+    const { publicId } = req.params;
+    const { resourceType = 'auto' } = req.query;
+
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType
+    });
+
+    res.json({
+      success: result.result === 'ok',
+      message: result.result === 'ok' ? 'File deleted successfully' : 'File not found'
+    });
+  } catch (error) {
+    console.error('Error deleting file from Cloudinary:', error);
+    res.status(500).json({ error: 'Failed to delete file' });
+  }
+});
+
+// Serve uploaded files (fallback for local files)
+app.use('/uploads', express.static('uploads'));
 
 // Health check endpoint
 app.get('/health', (req, res) => {

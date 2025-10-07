@@ -9,3 +9,12 @@
 ./chat-service/node_modules/
 ./chat-service/.env
 ./api keys.txt 
+./test-fridge1/node_modules/
+./test-fridge1/.env
+./test-fridge1/testimg/
+./test-fridge/node_modules/
+./test-fridge/.env
+./test-fridge/runs/
+./test-fridge/train/
+./test-fridge/valid/
+./test-fridge/test/

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YOLO Model Test - Moodbites</title>
+    <style>
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell, Noto Sans,sans-serif;background:#f7fafc;margin:0;padding:24px;color:#111}
+      .card{max-width:720px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.04);padding:24px}
+      h1{font-size:20px;margin:0 0 8px}
+      p{margin:0 0 16px;color:#4b5563}
+      .row{display:flex;gap:12px;align-items:center;margin:12px 0}
+      input[type=file]{padding:8px;border:1px solid #e5e7eb;border-radius:8px;width:100%}
+      button{background:#111827;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+      button:disabled{opacity:.6;cursor:not-allowed}
+      .result{margin-top:16px;padding:12px;border:1px dashed #d1d5db;border-radius:12px;background:#f9fafb}
+      .pred{padding:8px 10px;border-radius:8px;background:#eef2ff;margin:6px 0;font-size:14px}
+      .ok{color:#059669}
+      .err{color:#b91c1c}
+      code{background:#f3f4f6;padding:2px 6px;border-radius:6px}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>YOLO Model Test</h1>
+      <p>Upload an image to test <code>best.pt</code>. Backend runs on <code>http://localhost:4010</code>.</p>
+      <div class="row">
+        <input id="file" type="file" accept="image/*" />
+        <button id="btn">Predict</button>
+      </div>
+      <div id="status"></div>
+      <div id="results" class="result" style="display:none"></div>
+    </div>
+
+    <script>
+      const fileInput = document.getElementById('file');
+      const btn = document.getElementById('btn');
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+
+      btn.addEventListener('click', async () => {
+        if (!fileInput.files.length) {
+          alert('Choose an image first');
+          return;
+        }
+        btn.disabled = true;
+        status.innerHTML = '⏳ Predicting...';
+        results.style.display = 'none';
+        results.innerHTML = '';
+        try {
+          const fd = new FormData();
+          fd.append('file', fileInput.files[0]);
+          const res = await fetch('http://localhost:4010/api/predict', { method: 'POST', body: fd });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Prediction failed');
+          status.innerHTML = '<span class="ok">✅ Done</span>';
+          results.style.display = 'block';
+          if (json.predictions && json.predictions.length) {
+            json.predictions.forEach(p => {
+              const div = document.createElement('div');
+              div.className = 'pred';
+              div.textContent = `${p.className} (${p.confidence}) bbox=${JSON.stringify(p.bbox)}`;
+              results.appendChild(div);
+            });
+          } else {
+            results.innerHTML = 'No objects detected';
+          }
+        } catch (e) {
+          status.innerHTML = `<span class="err">❌ ${e.message}</span>`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+  </html>
+
+

@@ -24,6 +24,17 @@ if (process.env.GEMINI_API_KEY) {
   console.log('⚠️ GEMINI_API_KEY not set - using fallback responses');
 }
 
+// Domain-bound system prompt (Moodbites Healthy Helper)
+const MOODBITES_SYSTEM_PROMPT = `You are the 'Moodbites Healthy Helper,' a friendly and encouraging AI assistant for the Moodbites app. 🥕\n\nYour ONLY purpose is to help users with topics STRICTLY related to vegetables, fruits, nutrition, healthy recipes, food storage/preparation, and features of the Moodbites app.\n\nKnowledge domain:\n- Identifying vegetables and fruits.\n- Nutritional information (calories, vitamins, minerals).\n- Healthy recipes and cooking methods.\n- Food storage and preparation guidance.\n- Moodbites app features and usage.\n\nCRITICAL RULES:\n1) NEVER answer questions outside this domain.\n2) If a user asks something unrelated (e.g., history, math, celebrities, programming, politics), politely decline.\n3) When declining, gently guide them back: “As the Moodbites Healthy Helper, my expertise is in nutrition and vegetables. I can’t answer that, but I’d be happy to suggest a healthy recipe or share nutritional facts!”\n4) Do not reveal you are a large language model. Maintain the 'Moodbites Healthy Helper' persona.\n5) Keep answers concise, positive, and easy to understand.`;
+
+function getMoodbitesModel() {
+  if (!gemini) return null;
+  return gemini.getGenerativeModel({
+    model: 'gemini-1.5-flash',
+    systemInstruction: MOODBITES_SYSTEM_PROMPT
+  });
+}
+
 // Middleware
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],
@@ -169,6 +180,34 @@ async function generateEnhancedResponse(userMessage, intent, recipes = []) {
   }
 }
 
+// Strict, domain-bound response generator using the Moodbites system prompt
+async function generateDomainBoundResponse(userMessage) {
+  try {
+    const model = getMoodbitesModel();
+    if (!model) {
+      // Fallback: enforce domain manually
+      const msg = userMessage.toLowerCase();
+      const allowed = ['vegetable', 'fruit', 'nutrition', 'calorie', 'vitamin', 'mineral', 'recipe', 'cook', 'storage', 'moodbites'];
+      const isAllowed = allowed.some(k => msg.includes(k));
+      if (!isAllowed) {
+        return "As the Moodbites Healthy Helper, my expertise is nutrition and vegetables. I can’t answer that, but I can suggest a healthy recipe or share nutritional facts!";
+      }
+      // Minimal helpful fallback within domain
+      return "I can help with nutrition, recipes, and food storage. What vegetable or fruit would you like to know about?";
+    }
+
+    const result = await model.generateContent(userMessage);
+    const reply = result.response?.text?.().trim() || '';
+    if (!reply) {
+      return "I can help with nutrition, recipes, and food storage. What vegetable or fruit would you like to know about?";
+    }
+    return reply;
+  } catch (error) {
+    console.error('❌ Domain-bound response error:', error);
+    return "As the Moodbites Healthy Helper, my expertise is nutrition and vegetables. Ask me about veggies, fruits, calories, vitamins, or healthy recipes!";
+  }
+}
+
 // Enhanced main chatbot endpoint
 app.post('/api/chat', async (req, res) => {
   try {
@@ -207,6 +246,22 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// New endpoint: Strictly domain-bound Moodbites chat
+app.post('/api/moodbites-chat', async (req, res) => {
+  try {
+    const { userMessage } = req.body || {};
+    if (!userMessage || typeof userMessage !== 'string') {
+      return res.status(400).json({ error: 'userMessage is required (string)' });
+    }
+    console.log(`🥕 Moodbites chat: "${userMessage}"`);
+    const reply = await generateDomainBoundResponse(userMessage);
+    res.json({ success: true, reply, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('❌ /api/moodbites-chat error:', error);
+    res.status(500).json({ error: 'Failed to generate reply' });
+  }
+});
+
 // Enhanced complete flow endpoint
 app.post('/api/complete-flow', async (req, res) => {
   try {
@@ -239,15 +294,15 @@ app.post('/api/complete-flow', async (req, res) => {
       }
     }
 
-    // Step 3: Get recipes (only for mood/food intents)
+    // Step 3: Get Gemini food suggestions (no external recipe API)
     let recipes = [];
     if (intent === 'mood' || intent === 'food') {
       try {
-        const recipeResult = await getRecipesByMood(detectedMood);
-        recipes = recipeResult.recipes || [];
-        console.log(`🍽️ Found ${recipes.length} recipes`);
+        const suggestionResult = await getFoodSuggestionsWithGemini({ mood: detectedMood, userMessage });
+        recipes = suggestionResult.recipes || [];
+        console.log(`🍽️ Gemini suggestions: ${recipes.length}`);
       } catch (error) {
-        console.log('⚠️ Recipe fetch failed, using empty recipes');
+        console.log('⚠️ Gemini suggestions failed, using empty recipes');
       }
     }
 
@@ -401,28 +456,50 @@ async function detectMood(text) {
   }
 }
 
-// Get recipes using your existing Express service
-async function getRecipesByMood(mood) {
+// Generate food suggestions using Gemini (no external recipe API)
+async function getFoodSuggestionsWithGemini({ mood = 'neutral', userMessage = '' } = {}) {
   try {
-    const response = await fetch('http://localhost:3001/api/recipes/mood', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        mood: mood,
-        preferences: { number: 4 }
-      }),
-    });
-    
-    if (response.ok) {
-      const result = await response.json();
-      return result;
-    } else {
-      throw new Error(`Recipe fetch failed: ${response.status}`);
+    const model = getMoodbitesModel();
+    if (!model) {
+      // Fallback minimal suggestions
+      const fallback = {
+        recipes: [
+          { name: 'Roasted Broccoli' },
+          { name: 'Quinoa Veggie Bowl' },
+          { name: 'Berry Yogurt Parfait' }
+        ]
+      };
+      return fallback;
     }
+
+    const prompt = `Suggest 3 to 5 healthy, practical food or recipe ideas based on the user's input and mood.\n\nUser message: "${userMessage}"\nDetected mood: ${mood}\n\nRules:\n- Stay within nutrition/vegetables/healthy recipes domain.\n- Output ONLY valid JSON.\n- JSON schema: { "recipes": [{ "name": string, "why": string }] }\n- Keep names concise; "why" 6-14 words.\n- No URLs. No extra commentary.`;
+
+    const result = await model.generateContent([prompt]);
+    const raw = result.response?.text?.() || '';
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.recipes)) {
+        // Normalize to at most name and why
+        const recipes = parsed.recipes.map(r => ({ name: String(r.name || '').trim(), why: (r.why ? String(r.why).trim() : undefined) }))
+          .filter(r => r.name);
+        return { recipes };
+      }
+    } catch (_) {
+      // Try to coerce common JSON-in-markdown responses
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        const coerced = JSON.parse(match[0]);
+        if (coerced && Array.isArray(coerced.recipes)) {
+          const recipes = coerced.recipes.map(r => ({ name: String(r.name || '').trim(), why: (r.why ? String(r.why).trim() : undefined) }))
+            .filter(r => r.name);
+          return { recipes };
+        }
+      }
+    }
+    // Last-resort fallback
+    return { recipes: [] };
   } catch (error) {
-    console.error('❌ Recipe fetch error:', error);
+    console.error('❌ Gemini suggestion error:', error);
     return { recipes: [] };
   }
 }
@@ -479,6 +556,7 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       chat: '/api/chat (POST)',
+      moodbitesChat: '/api/moodbites-chat (POST)',
       completeFlow: '/api/complete-flow (POST)',
       test: '/api/test'
     },
@@ -496,6 +574,13 @@ app.get('/', (req, res) => {
         body: {
           userMessage: 'string'
         }
+      },
+      moodbitesChat: {
+        post: '/api/moodbites-chat',
+        body: {
+          userMessage: 'string'
+        },
+        behavior: 'Strictly domain-bound to vegetables, fruits, nutrition, recipes, storage, and Moodbites app.'
       }
     }
   });

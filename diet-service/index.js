@@ -320,6 +320,36 @@ app.get('/api/diet-plans/:userId', async (req, res) => {
   }
 });
 
+// Admin: Get all active diet plans (with diet meta), paginated
+app.get('/api/diet-plans', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page || '1', 10);
+    const limit = parseInt(req.query.limit || '50', 10);
+    const skip = (page - 1) * limit;
+
+    const [total, dietPlans] = await Promise.all([
+      DietPlan.countDocuments({ isActive: true }),
+      DietPlan.find({ isActive: true })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('dietId', 'activity goals dietPreference cuisine')
+    ]);
+
+    res.json({
+      success: true,
+      total,
+      page,
+      limit,
+      count: dietPlans.length,
+      dietPlans
+    });
+  } catch (err) {
+    console.error('Fetch all diet plans error:', err);
+    res.status(500).json({ message: 'Failed to fetch diet plans', error: err.message });
+  }
+});
+
 // Get a specific diet plan by ID
 app.get('/api/diet-plans/detail/:planId', async (req, res) => {
   try {

@@ -1,0 +1,13 @@
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 38
+names: ['Avocado', 'Bell Pepper', 'Broccoli', 'Burger', 'Carrot', 'Lettuce', 'Potato', 'Pumpkin', 'Tomato', 'apple', 'banana', 'banana_pacche', 'beans', 'beet', 'blackberries', 'brus capusta', 'cabbage', 'cayliflower', 'celery', 'chilli', 'corn', 'cucumber', 'eggplant', 'fasol', 'garlic', 'grapes', 'hot pepper', 'lemon', 'onion', 'orange', 'peas', 'raspberries', 'rediska', 'redka', 'salad', 'squash-patisson', 'tomato', 'vegetable marrow']
+
+roboflow:
+  workspace: moobites
+  project: vegetables-g9p5a-ao38w
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/moobites/vegetables-g9p5a-ao38w/dataset/1

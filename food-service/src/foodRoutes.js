@@ -11,7 +11,11 @@ const {
   searchDishes, 
   getDishesByIngredients,
   uploadRecipeImage,
-  toggleDishStatus
+  toggleDishStatus,
+  saveRecipe,
+  getSavedRecipesByUser,
+  getSavedRecipeById,
+  deleteSavedRecipe
 } = require('./foodController');
 const { upload } = require('./cloudinaryConfig');
 
@@ -35,5 +39,11 @@ router.get('/users/:userId/dishes', getDishesByUser);
 router.get('/dishes/mood/:mood', getDishesByMood);
 router.get('/dishes/search', searchDishes);
 router.get('/dishes/ingredients', getDishesByIngredients);
+
+// Saved recipes
+router.post('/saved-recipes', saveRecipe);
+router.get('/users/:userId/saved-recipes', getSavedRecipesByUser);
+router.get('/saved-recipes/:id', getSavedRecipeById);
+router.delete('/saved-recipes/:id', deleteSavedRecipe);
 
 module.exports = router;

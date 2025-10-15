@@ -4,6 +4,10 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { v2 as cloudinary } from "cloudinary";
 import Conversation from "./models/Chat.js";
 
 // Load environment variables
@@ -22,6 +26,33 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Configure Cloudinary (optional uploads)
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Multer storage for uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = "uploads";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 16 * 1024 * 1024 },
+});
 
 // MongoDB connection
 const connectDB = async () => {
@@ -80,6 +111,22 @@ io.on("connection", (socket) => {
         messageType,
         createdAt: new Date(),
         isRead: false,
+        // Plan fields passthrough
+        planId: data.planId,
+        planName: data.planName,
+        totalCalories: data.totalCalories,
+        preferences: data.preferences,
+        meals: data.meals,
+        // File fields passthrough
+        fileName: data.fileName,
+        fileSize: data.fileSize,
+        fileType: data.fileType,
+        fileUrl: data.fileUrl,
+        filePublicId: data.filePublicId,
+        // Audio fields passthrough
+        audioUrl: data.audioUrl,
+        audioPublicId: data.audioPublicId,
+        audioDuration: data.audioDuration,
       };
 
       // Add message to conversation and update
@@ -161,11 +208,16 @@ app.get("/health", (req, res) => {
 app.get("/api/conversations/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
+    let userObjectId;
+    try {
+      userObjectId = new mongoose.Types.ObjectId(userId);
+    } catch (e) {
+      userObjectId = null;
+    }
+
     const conversations = await Conversation.find({
-      participants: userId,
-    })
-      .populate("participants", "name email")
-      .sort({ lastUpdated: -1 });
+      participants: { $in: userObjectId ? [userObjectId, userId] : [userId] },
+    }).sort({ lastUpdated: -1 });
 
     res.json(conversations);
   } catch (error) {
@@ -191,6 +243,96 @@ app.get("/api/conversations/:conversationId/messages", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
+
+// Upload audio
+app.post("/api/upload/audio", upload.single("audio"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No audio file provided" });
+    }
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "video",
+      folder: "moodbites/audio",
+      use_filename: true,
+      unique_filename: true,
+      overwrite: false,
+    });
+    fs.unlinkSync(req.file.path);
+    res.json({
+      audioUrl: result.secure_url,
+      audioPublicId: result.public_id,
+      duration: 0,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+    });
+  } catch (error) {
+    console.error("Error uploading audio to Cloudinary:", error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: "Failed to upload audio" });
+  }
+});
+
+// Upload generic file/image
+app.post("/api/upload/file", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file provided" });
+    }
+    const fileType = req.body.fileType || "auto";
+    let resourceType = "auto";
+    let folder = "moodbites/files";
+    if (fileType === "image") {
+      resourceType = "image";
+      folder = "moodbites/images";
+    } else if (fileType === "video") {
+      resourceType = "video";
+      folder = "moodbites/videos";
+    } else if (fileType === "audio") {
+      resourceType = "video";
+      folder = "moodbites/audio";
+    }
+
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: resourceType,
+      folder,
+      use_filename: true,
+      unique_filename: true,
+      overwrite: false,
+    });
+    fs.unlinkSync(req.file.path);
+    res.json({
+      fileUrl: result.secure_url,
+      filePublicId: result.public_id,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType,
+    });
+  } catch (error) {
+    console.error("Error uploading file to Cloudinary:", error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: "Failed to upload file" });
+  }
+});
+
+// Delete file from Cloudinary
+app.delete("/api/upload/delete/:publicId", async (req, res) => {
+  try {
+    const { publicId } = req.params;
+    const { resourceType = "auto" } = req.query;
+    const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    res.json({ success: result.result === "ok", message: result.result });
+  } catch (error) {
+    console.error("Error deleting file from Cloudinary:", error);
+    res.status(500).json({ error: "Failed to delete file" });
+  }
+});
+
+// Serve static uploads (fallback)
+app.use("/uploads", express.static("uploads"));
 
 // Start server
 const PORT = process.env.PORT || 3006;

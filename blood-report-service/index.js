@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import { v2 as cloudinary } from 'cloudinary';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { createRequire } from 'module';
@@ -19,11 +18,6 @@ app.use(cors());
 app.use(express.json());
 
 // --- Configurations ---
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -32,7 +26,7 @@ const upload = multer({ storage });
 const bloodReportSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   fileName: { type: String, required: true },
-  fileUrl: { type: String, required: true },
+  fileUrl: { type: String },
   extractedText: { type: String, required: true },
   analysisResults: {
     patientName: String,
@@ -184,19 +178,9 @@ app.post('/api/blood-report/analyze', upload.single('bloodReport'), async (req, 
     const { userId } = req.body;
     const file = req.file;
 
-    console.log('📋 Analyzing blood report:', file.originalname);
+    console.log('📋 Analyzing blood report (no file storage):', file.originalname);
 
-    // Step 1: Upload to Cloudinary
-    const uploadResult = await new Promise((resolve, reject) => {
-      cloudinary.uploader.upload_stream({
-        resource_type: 'auto',
-        folder: 'blood-reports',
-        public_id: `${userId}_${Date.now()}`,
-      }, (err, result) => err ? reject(err) : resolve(result)).end(file.buffer);
-    });
-    console.log('☁️ File uploaded to Cloudinary:', uploadResult.secure_url);
-
-    // Step 2: Get raw text from Python OCR service (with PDF fallback)
+    // Step 1: Get raw text from Python OCR service (with PDF fallback)
     const ocrResponse = await callPythonOCR(file.buffer, file.mimetype);
     let ocrText = '';
     if (ocrResponse.status === 200) {
@@ -237,10 +221,10 @@ app.post('/api/blood-report/analyze', upload.single('bloodReport'), async (req, 
       });
     }
 
-    // Step 3: Use the AI model to parse the raw text into structured JSON
+    // Step 2: Use the AI model to parse the raw text into structured JSON
     const analysisResults = await extractStructuredDataWithAI(ocrText);
 
-    // Step 4: Generate insights (this can also be an AI task in the future)
+    // Step 3: Generate insights (this can also be an AI task in the future)
     const insights = [];
     if (analysisResults.tests.some(t => t.status && t.status.toLowerCase() !== 'normal')) {
         insights.push({
@@ -250,11 +234,10 @@ app.post('/api/blood-report/analyze', upload.single('bloodReport'), async (req, 
         });
     }
 
-    // Step 5: Save the structured data to the database
+    // Step 4: Save the structured data to the database (store text only, no fileUrl)
     const bloodReport = new BloodReport({
       userId: userId || new mongoose.Types.ObjectId(),
       fileName: file.originalname,
-      fileUrl: uploadResult.secure_url,
       extractedText: ocrText,
       analysisResults, // Use the structured data from the AI model
       insights,
@@ -277,6 +260,24 @@ app.post('/api/blood-report/analyze', upload.single('bloodReport'), async (req, 
       error: 'Failed to analyze blood report',
       details: error.message 
     });
+  }
+});
+
+// Fetch latest analyzed blood report for a user
+app.get('/api/blood-report/latest/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) return res.status(400).json({ message: 'userId is required' });
+
+    const report = await BloodReport.findOne({ userId }).sort({ createdAt: -1 });
+    if (!report) {
+      return res.status(404).json({ message: 'No blood report found for user' });
+    }
+
+    res.json({ success: true, report });
+  } catch (error) {
+    console.error('❌ Fetch latest blood report error:', error);
+    res.status(500).json({ message: 'Failed to fetch latest blood report' });
   }
 });
 

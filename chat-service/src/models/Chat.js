@@ -17,9 +17,25 @@ const messageSchema = new mongoose.Schema({
   },
   messageType: {
     type: String,
-    enum: ["text", "image", "file"], // Flexible for future
+    enum: ["text", "image", "file", "audio", "plan"],
     default: "text",
   },
+  // Plan-specific fields (optional)
+  planId: { type: mongoose.Schema.Types.ObjectId, ref: "DietPlan" },
+  planName: { type: String },
+  totalCalories: { type: String },
+  preferences: { type: mongoose.Schema.Types.Mixed },
+  meals: { type: [Object] },
+  // File-related fields
+  fileName: { type: String },
+  fileSize: { type: Number },
+  fileType: { type: String },
+  fileUrl: { type: String },
+  filePublicId: { type: String },
+  // Audio-specific fields
+  audioUrl: { type: String },
+  audioPublicId: { type: String },
+  audioDuration: { type: Number },
   createdAt: {
     type: Date,
     default: Date.now,

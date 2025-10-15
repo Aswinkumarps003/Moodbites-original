@@ -11,6 +11,7 @@ app.use(express.json());
 const MONGO_URI = process.env.MONGO_URI;
 const PORT = process.env.PORT;
 const SPOONACULAR_API_KEY = process.env.SPOONACULAR_API_KEY;
+const BLOOD_REPORT_BASE_URL = process.env.BLOOD_REPORT_BASE_URL || 'http://localhost:8000';
 
 //(using Spoonacular only)
 
@@ -86,6 +87,20 @@ const dietPlanSchema = new mongoose.Schema({
     cuisine: [{ type: String }],
     healthConditions: [{ type: String }]
   },
+  // Sharing to a dietician for review/consultation
+  sharedWithDietician: {
+    dieticianId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    status: { type: String, enum: ['not_shared','pending','accepted','rejected'], default: 'not_shared' },
+    sharedAt: { type: Date, default: null }
+  },
+  // Dietician recommendations
+  recommendations: [{
+    dieticianId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    note: { type: String, required: true },
+    suggestedChanges: { type: mongoose.Schema.Types.Mixed, default: null },
+    status: { type: String, enum: ['proposed','accepted','rejected'], default: 'proposed' },
+    createdAt: { type: Date, default: Date.now }
+  }],
   isActive: { type: Boolean, default: true },
   generatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
@@ -148,7 +163,7 @@ app.get('/api/diet-planner/:userId', async (req, res) => {
 
 // Helper: fetch recipes from Spoonacular using cuisine + diet filters
 async function fetchSpoonacularRecipes(dietDoc) {
-  let baseUrl = `https://api.spoonacular.com/recipes/complexSearch?number=5&addRecipeNutrition=true&apiKey=${SPOONACULAR_API_KEY}`;
+  let baseUrl = `https://api.spoonacular.com/recipes/complexSearch?number=5&addRecipeNutrition=true&addRecipeInformation=true&imageType=jpg&apiKey=${SPOONACULAR_API_KEY}`;
 
   // Add cuisine filter if available
   if (dietDoc.cuisine && dietDoc.cuisine.length > 0) {
@@ -224,7 +239,10 @@ async function createDetailedDietPlan(recipes, dietDoc) {
     plan[mealName] = {
       recipe: recipe.title,
       calories: Math.round(calories),
-      ingredients: recipe.nutrition?.ingredients?.map(i => i.name) || []
+      ingredients: recipe.nutrition?.ingredients?.map(i => i.name) || [],
+      image: recipe.image || null,
+      readyInMinutes: recipe.readyInMinutes || 30,
+      servings: recipe.servings || 1
     };
   });
   
@@ -355,7 +373,9 @@ app.get('/api/diet-plans/detail/:planId', async (req, res) => {
   try {
     const { planId } = req.params;
     const dietPlan = await DietPlan.findById(planId)
-      .populate('dietId', 'activity goals dietPreference cuisine conditions');
+      .populate('dietId', 'activity goals dietPreference cuisine conditions')
+      .populate('sharedWithDietician.dieticianId', 'name email')
+      .populate('recommendations.dieticianId', 'name email');
     
     if (!dietPlan) {
       return res.status(404).json({ message: 'Diet plan not found' });
@@ -368,6 +388,90 @@ app.get('/api/diet-plans/detail/:planId', async (req, res) => {
   } catch (err) {
     console.error('Fetch diet plan detail error:', err);
     res.status(500).json({ message: 'Failed to fetch diet plan', error: err.message });
+  }
+});
+
+// Share a plan to a dietician (user triggers)
+app.post('/api/diet-plans/:planId/share', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const { dieticianId } = req.body;
+    if (!dieticianId) return res.status(400).json({ message: 'dieticianId is required' });
+    const plan = await DietPlan.findById(planId);
+    if (!plan) return res.status(404).json({ message: 'Diet plan not found' });
+    plan.sharedWithDietician = { dieticianId, status: 'pending', sharedAt: new Date() };
+    await plan.save();
+    res.json({ success: true, plan });
+  } catch (err) {
+    console.error('Share plan error:', err);
+    res.status(500).json({ message: 'Failed to share plan', error: err.message });
+  }
+});
+
+// Dietician: list plans shared with them
+app.get('/api/dietician/:dieticianId/shared-plans', async (req, res) => {
+  try {
+    const { dieticianId } = req.params;
+    const plans = await DietPlan.find({ 'sharedWithDietician.dieticianId': dieticianId })
+      .sort({ updatedAt: -1 })
+      .populate('userId', 'name email')
+      .populate('dietId', 'activity goals dietPreference cuisine')
+      .select('-recommendations.suggestedChanges');
+    res.json({ success: true, count: plans.length, plans });
+  } catch (err) {
+    console.error('List shared plans error:', err);
+    res.status(500).json({ message: 'Failed to list shared plans', error: err.message });
+  }
+});
+
+// Dietician: respond to share (accept/reject)
+app.patch('/api/diet-plans/:planId/share/status', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const { status } = req.body; // 'accepted' | 'rejected'
+    if (!['accepted','rejected'].includes(status)) return res.status(400).json({ message: 'invalid status' });
+    const plan = await DietPlan.findByIdAndUpdate(planId, { 'sharedWithDietician.status': status }, { new: true });
+    if (!plan) return res.status(404).json({ message: 'Diet plan not found' });
+    res.json({ success: true, plan });
+  } catch (err) {
+    console.error('Update share status error:', err);
+    res.status(500).json({ message: 'Failed to update share status', error: err.message });
+  }
+});
+
+// Dietician: add recommendation to a shared plan
+app.post('/api/diet-plans/:planId/recommendations', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const { dieticianId, note, suggestedChanges } = req.body;
+    if (!dieticianId || !note) return res.status(400).json({ message: 'dieticianId and note are required' });
+    const plan = await DietPlan.findById(planId);
+    if (!plan) return res.status(404).json({ message: 'Diet plan not found' });
+    plan.recommendations.push({ dieticianId, note, suggestedChanges: suggestedChanges || null, status: 'proposed', createdAt: new Date() });
+    await plan.save();
+    res.status(201).json({ success: true, plan });
+  } catch (err) {
+    console.error('Add recommendation error:', err);
+    res.status(500).json({ message: 'Failed to add recommendation', error: err.message });
+  }
+});
+
+// User: accept or reject a recommendation
+app.patch('/api/diet-plans/:planId/recommendations/:recId/status', async (req, res) => {
+  try {
+    const { planId, recId } = req.params;
+    const { status } = req.body; // 'accepted' | 'rejected'
+    if (!['accepted','rejected'].includes(status)) return res.status(400).json({ message: 'invalid status' });
+    const plan = await DietPlan.findById(planId);
+    if (!plan) return res.status(404).json({ message: 'Diet plan not found' });
+    const rec = plan.recommendations.id(recId);
+    if (!rec) return res.status(404).json({ message: 'Recommendation not found' });
+    rec.status = status;
+    await plan.save();
+    res.json({ success: true, plan });
+  } catch (err) {
+    console.error('Update recommendation status error:', err);
+    res.status(500).json({ message: 'Failed to update recommendation status', error: err.message });
   }
 });
 
@@ -396,6 +500,33 @@ app.patch('/api/diet-plans/:planId/deactivate', async (req, res) => {
   }
 });
 
+// Admin: explicitly set plan active status
+app.patch('/api/diet-plans/:planId/status', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const { isActive } = req.body;
+
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ message: 'isActive boolean is required' });
+    }
+
+    const dietPlan = await DietPlan.findByIdAndUpdate(
+      planId,
+      { isActive },
+      { new: true }
+    );
+
+    if (!dietPlan) {
+      return res.status(404).json({ message: 'Diet plan not found' });
+    }
+
+    res.json({ success: true, dietPlan });
+  } catch (err) {
+    console.error('Update diet plan status error:', err);
+    res.status(500).json({ message: 'Failed to update diet plan status', error: err.message });
+  }
+});
+
 // Get active diet plan for a user
 app.get('/api/diet-plans/:userId/active', async (req, res) => {
   try {
@@ -415,6 +546,125 @@ app.get('/api/diet-plans/:userId/active', async (req, res) => {
   } catch (err) {
     console.error('Fetch active diet plan error:', err);
     res.status(500).json({ message: 'Failed to fetch active diet plan', error: err.message });
+  }
+});
+
+// =================== Personalized Recipes Based on Blood Report ===================
+
+// Map analysisResults.tests to key biomarkers
+function extractBiomarkersFromReport(report) {
+  const out = { glucose: null, totalCholesterol: null, ldl: null, hdl: null, triglycerides: null };
+  const tests = report?.analysisResults?.tests || [];
+  const norm = (s) => (s || '').toLowerCase().trim();
+  tests.forEach(t => {
+    const name = norm(t.name);
+    const valueNum = parseFloat(String(t.value || '').replace(/[^0-9.]/g, ''));
+    if (Number.isFinite(valueNum)) {
+      if (name.includes('glucose') || name.includes('sugar')) out.glucose = valueNum;
+      else if (name.includes('total') && name.includes('cholesterol')) out.totalCholesterol = valueNum;
+      else if (name.includes('ldl')) out.ldl = valueNum;
+      else if (name.includes('hdl')) out.hdl = valueNum;
+      else if (name.includes('triglycer')) out.triglycerides = valueNum;
+    }
+  });
+  return out;
+}
+
+// Thresholds (basic clinical cutoffs; can be refined)
+const BIOMARKER_THRESHOLDS = {
+  glucoseHigh: 125, // mg/dL fasting
+  glucoseBorderline: 100,
+  totalCholHigh: 240, // mg/dL
+  totalCholBorderline: 200,
+  ldlHigh: 160,
+  ldlBorderline: 130,
+  triglyceridesHigh: 200,
+  triglyceridesBorderline: 150,
+};
+
+function buildSpoonacularParamsForHealth(bio) {
+  const params = new URLSearchParams();
+  // Base healthy filters
+  params.set('number', '10');
+  params.set('addRecipeNutrition', 'true');
+
+  // Glucose driven
+  if ((bio.glucose && bio.glucose >= BIOMARKER_THRESHOLDS.glucoseBorderline)) {
+    params.set('maxSugar', '10'); // grams per serving
+    params.append('intolerances', 'sugar');
+    params.set('sort', 'healthiness');
+    // Prefer low carb for glucose control
+    params.set('diet', 'low-carb');
+  }
+
+  // Cholesterol/LDL driven
+  const cholRisk = (bio.totalCholesterol && bio.totalCholesterol >= BIOMARKER_THRESHOLDS.totalCholBorderline) ||
+                   (bio.ldl && bio.ldl >= BIOMARKER_THRESHOLDS.ldlBorderline);
+  if (cholRisk) {
+    params.set('maxSaturatedFat', '7'); // grams
+    params.set('maxCholesterol', '150'); // mg
+    // Prefer low fat
+    if (!params.get('diet')) params.set('diet', 'low-fat');
+  }
+
+  // Triglycerides
+  if (bio.triglycerides && bio.triglycerides >= BIOMARKER_THRESHOLDS.triglyceridesBorderline) {
+    // Encourage lower simple carbs
+    if (!params.get('maxSugar')) params.set('maxSugar', '12');
+    params.set('maxCarbs', '50'); // grams (rough guide)
+  }
+
+  return params;
+}
+
+async function fetchPersonalizedRecipesFromSpoonacular(params) {
+  const url = `https://api.spoonacular.com/recipes/complexSearch?apiKey=${SPOONACULAR_API_KEY}&${params.toString()}`;
+  const resp = await fetch(url);
+  const text = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`Spoonacular error ${resp.status}: ${text}`);
+  }
+  const data = JSON.parse(text);
+  return Array.isArray(data.results) ? data.results : [];
+}
+
+// Core function: getPersonalizedRecipes(userId)
+async function getPersonalizedRecipes(userId) {
+  // 1) Check latest blood report
+  const r = await fetch(`${BLOOD_REPORT_BASE_URL}/api/blood-report/latest/${userId}`);
+  if (!r.ok) return { personalized: false, recipes: [] };
+  const json = await r.json();
+  const report = json.report;
+  if (!report || !report.analysisResults) return { personalized: false, recipes: [] };
+
+  // 2) Extract biomarkers and build params
+  const biomarkers = extractBiomarkersFromReport(report);
+  const params = buildSpoonacularParamsForHealth(biomarkers);
+
+  // 3) Fetch recipes
+  const recipes = await fetchPersonalizedRecipesFromSpoonacular(params);
+  return { personalized: true, recipes, biomarkers };
+}
+
+// Public endpoint
+app.get('/api/diet-plans/personalized/recipes/:userId', async (req, res) => {
+  try {
+    if (!SPOONACULAR_API_KEY) {
+      return res.status(400).json({ message: 'Missing SPOONACULAR_API_KEY' });
+    }
+    const { userId } = req.params;
+    const result = await getPersonalizedRecipes(userId);
+    if (!result.personalized) {
+      // Fallback: use last diet doc filters (non-personalized)
+      const dietDoc = await Diet.findOne({ userId }).sort({ createdAt: -1 });
+      const fallbackRecipes = dietDoc ? await fetchSpoonacularRecipes(dietDoc) : [];
+      return res.json({ success: true, personalized: false, recipes: fallbackRecipes });
+    }
+
+    return res.json({ success: true, personalized: true, biomarkers: result.biomarkers, recipes: result.recipes });
+  } catch (err) {
+    console.error('Personalized recipes error:', err);
+    res.status(500).json({ message: 'Failed to fetch personalized recipes', error: err.message });
   }
 });
 

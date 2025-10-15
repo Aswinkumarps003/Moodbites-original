@@ -204,6 +204,82 @@ class FoodModel {
       throw new Error(`Error fetching dishes by ingredients: ${error.message}`);
     }
   }
+
+  // Create saved recipe
+  static async createSavedRecipe(saved) {
+    try {
+      const { data, error } = await supabase
+        .from('saved_recipes')
+        .insert([saved])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Supabase error in createSavedRecipe:', error);
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error in createSavedRecipe:', error);
+      throw new Error(`Error saving recipe: ${error.message}`);
+    }
+  }
+
+  static async getSavedRecipesByUser(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('saved_recipes')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase error in getSavedRecipesByUser:', error);
+        throw error;
+      }
+      return data || [];
+    } catch (error) {
+      console.error('Error in getSavedRecipesByUser:', error);
+      throw new Error(`Error fetching saved recipes: ${error.message}`);
+    }
+  }
+
+  static async getSavedRecipeById(id) {
+    try {
+      const { data, error } = await supabase
+        .from('saved_recipes')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) {
+        console.error('Supabase error in getSavedRecipeById:', error);
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error in getSavedRecipeById:', error);
+      throw new Error(`Error fetching saved recipe: ${error.message}`);
+    }
+  }
+
+  static async deleteSavedRecipe(id) {
+    try {
+      const { error } = await supabase
+        .from('saved_recipes')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Supabase error in deleteSavedRecipe:', error);
+        throw error;
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('Error in deleteSavedRecipe:', error);
+      throw new Error(`Error deleting saved recipe: ${error.message}`);
+    }
+  }
 }
 
 module.exports = FoodModel; 

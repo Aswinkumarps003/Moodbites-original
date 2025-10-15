@@ -15,7 +15,7 @@
     "nodemon": "^3.1.10"
   },
   "scripts": {
-    "start:all": "concurrently \"npm run dev --prefix food-service\" \"npm run dev --prefix user-service\" \"npm run dev --prefix frontend\"",
+    "start:all": "concurrently \"npm run dev --prefix food-service\" \"npm run dev --prefix user-service\" \"npm run dev --prefix frontend\" \"npm run dev --prefix diet-service\" \"npm run dev --prefix blood-report-service\" \"npm run dev --prefix chat-service\"",
     "start": "npm run start:all"
   },
   "author": "Achu",

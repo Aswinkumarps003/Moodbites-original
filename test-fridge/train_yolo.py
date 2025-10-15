@@ -42,7 +42,7 @@ def main():
     # Configuration
     DATASET_YAML_PATH = 'data.yaml'
     EPOCHS = 50  # Reduced for faster training
-    IMAGE_SIZE = 640
+IMAGE_SIZE = 640
     BATCH_SIZE = 16  # Adjust based on your GPU memory
     
     print(f"📊 Training Configuration:")
@@ -72,16 +72,16 @@ def main():
     try:
         # Load pre-trained model
         print("\n🤖 Loading pre-trained YOLOv8m model...")
-        model = YOLO('yolov8m.pt')
-        
+model = YOLO('yolov8m.pt') 
+
         # Start training
         print(f"\n🚀 Starting training for {EPOCHS} epochs...")
         print("   This may take a while...")
         
-        results = model.train(
-            data=DATASET_YAML_PATH,
-            epochs=EPOCHS,
-            imgsz=IMAGE_SIZE,
+results = model.train(
+    data=DATASET_YAML_PATH,
+    epochs=EPOCHS,
+    imgsz=IMAGE_SIZE,
             batch=BATCH_SIZE,
             name='yolo_vegetable_detector',
             device=device,

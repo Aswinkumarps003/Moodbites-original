@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import { v2 as cloudinary } from 'cloudinary';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -31,7 +32,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { v2 as cloudinary } from 'cloudinary';
+// cloudinary already imported above
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -90,9 +91,15 @@ const messageSchema = new mongoose.Schema({
   },
   messageType: {
     type: String,
-    enum: ["text", "image", "file", "audio"],
+    enum: ["text", "image", "file", "audio", "plan"],
     default: "text",
   },
+  // Plan-specific fields (optional)
+  planId: { type: mongoose.Schema.Types.ObjectId, ref: 'DietPlan' },
+  planName: { type: String },
+  totalCalories: { type: String },
+  preferences: { type: mongoose.Schema.Types.Mixed },
+  meals: { type: [Object] },
   // File-related fields
   fileName: {
     type: String,

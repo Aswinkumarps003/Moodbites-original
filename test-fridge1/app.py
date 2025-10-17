@@ -111,3 +111,4 @@ if __name__ == '__main__':
         print(f'⚠️  Model preload failed: {e}. Will attempt lazy load on first request.')
     app.run(host='0.0.0.0', port=4010, debug=True)
 
+    

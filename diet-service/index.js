@@ -391,6 +391,125 @@ app.get('/api/diet-plans/detail/:planId', async (req, res) => {
   }
 });
 
+// Spoonacular: proxy search (for overrides)
+app.get('/api/spoonacular/search', async (req, res) => {
+  try {
+    if (!SPOONACULAR_API_KEY) {
+      return res.status(400).json({ message: 'Missing SPOONACULAR_API_KEY' });
+    }
+    const q = String(req.query.q || '').trim();
+    const number = parseInt(req.query.number || '10', 10);
+    const cuisine = String(req.query.cuisine || '').trim();
+    const dietPreference = String(req.query.dietPreference || '').trim();
+    const lowSugar = String(req.query.lowSugar || '').toLowerCase() === 'true';
+    const lowCholesterol = String(req.query.lowCholesterol || '').toLowerCase() === 'true';
+    const lowSaturatedFat = String(req.query.lowSaturatedFat || '').toLowerCase() === 'true';
+    const lowCarb = String(req.query.lowCarb || '').toLowerCase() === 'true';
+
+    if (!q) return res.status(400).json({ message: 'q is required' });
+
+    let url = `https://api.spoonacular.com/recipes/complexSearch?query=${encodeURIComponent(q)}&number=${Math.min(Math.max(number,1),25)}&addRecipeInformation=true&addRecipeNutrition=true&imageType=jpg&apiKey=${SPOONACULAR_API_KEY}`;
+    if (cuisine) url += `&cuisine=${encodeURIComponent(cuisine)}`;
+    if (dietPreference) {
+      const map = { 'Veg': 'vegetarian', 'Vegan': 'vegan', 'Eggetarian': 'vegetarian' };
+      const diet = map[dietPreference] || '';
+      if (diet) url += `&diet=${encodeURIComponent(diet)}`;
+    }
+    if (lowSugar) url += `&maxSugar=12`;
+    if (lowCholesterol) url += `&maxCholesterol=150&maxSaturatedFat=7`;
+    if (lowSaturatedFat) url += `&maxSaturatedFat=7`;
+    if (lowCarb) url += `&maxCarbs=50&diet=low-carb`;
+    const r = await fetch(url);
+    const text = await r.text();
+    if (!r.ok) return res.status(r.status).send(text);
+    const json = JSON.parse(text);
+    return res.json({ success: true, results: json.results || [] });
+  } catch (err) {
+    console.error('spoonacular search error:', err);
+    return res.status(500).json({ message: 'Failed to search recipes', error: err.message });
+  }
+});
+
+// Spoonacular: fetch a single recipe by ID with nutrition
+app.get('/api/spoonacular/recipes/:id', async (req, res) => {
+  try {
+    if (!SPOONACULAR_API_KEY) {
+      return res.status(400).json({ message: 'Missing SPOONACULAR_API_KEY' });
+    }
+    const id = req.params.id;
+    const url = `https://api.spoonacular.com/recipes/${id}/information?includeNutrition=true&apiKey=${SPOONACULAR_API_KEY}`;
+    const r = await fetch(url);
+    const text = await r.text();
+    if (!r.ok) return res.status(r.status).send(text);
+    const json = JSON.parse(text);
+    return res.json({ success: true, recipe: json });
+  } catch (err) {
+    console.error('spoonacular get recipe error:', err);
+    return res.status(500).json({ message: 'Failed to fetch recipe', error: err.message });
+  }
+});
+
+// Replace a meal in a diet plan with a new Spoonacular recipe
+app.patch('/api/diet-plans/:planId/meals/replace', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    const { mealType, mealIndex, spoonacularId } = req.body || {};
+    if (!spoonacularId) return res.status(400).json({ message: 'spoonacularId is required' });
+    const plan = await DietPlan.findById(planId);
+    if (!plan) return res.status(404).json({ message: 'Diet plan not found' });
+
+    // Fetch recipe details
+    if (!SPOONACULAR_API_KEY) {
+      return res.status(400).json({ message: 'Missing SPOONACULAR_API_KEY' });
+    }
+    const recipeUrl = `https://api.spoonacular.com/recipes/${spoonacularId}/information?includeNutrition=true&apiKey=${SPOONACULAR_API_KEY}`;
+    const r = await fetch(recipeUrl);
+    const text = await r.text();
+    if (!r.ok) return res.status(r.status).send(text);
+    const recipe = JSON.parse(text);
+
+    // Build meal object consistent with stored structure
+    const nutrition = recipe.nutrition?.nutrients || [];
+    const calories = Math.round(nutrition.find(n => n.name === 'Calories')?.amount || 0);
+    const protein = Math.round(nutrition.find(n => n.name === 'Protein')?.amount || 0);
+    const carbs = Math.round(nutrition.find(n => n.name === 'Carbohydrates')?.amount || 0);
+    const fat = Math.round(nutrition.find(n => n.name === 'Fat')?.amount || 0);
+    const fiber = Math.round(nutrition.find(n => n.name === 'Fiber')?.amount || 0);
+    const sugar = Math.round(nutrition.find(n => n.name === 'Sugar')?.amount || 0);
+
+    const newMeal = {
+      mealType: mealType || (plan.meals[mealIndex]?.mealType) || 'Meal',
+      recipe: recipe.title,
+      calories,
+      ingredients: (recipe.nutrition?.ingredients || []).map(i => i.name),
+      spoonacularId: recipe.id,
+      image: recipe.image,
+      readyInMinutes: recipe.readyInMinutes || 30,
+      servings: recipe.servings || 1,
+      nutrition: { protein, carbs, fat, fiber, sugar }
+    };
+
+    // Find target index
+    let idx = -1;
+    if (Number.isInteger(mealIndex)) idx = Math.max(0, Math.min(plan.meals.length - 1, mealIndex));
+    if (idx < 0 && mealType) {
+      idx = plan.meals.findIndex(m => (m.mealType || '').toLowerCase() === String(mealType).toLowerCase());
+    }
+    if (idx < 0) return res.status(400).json({ message: 'Specify a valid mealIndex or mealType' });
+
+    // Replace and recalc total calories
+    plan.meals[idx] = newMeal;
+    const totalCalories = plan.meals.reduce((sum, m) => sum + (m.calories || 0), 0);
+    plan.totalCalories = `${totalCalories} kcal`;
+    await plan.save();
+
+    return res.json({ success: true, dietPlan: plan });
+  } catch (err) {
+    console.error('replace meal error:', err);
+    return res.status(500).json({ message: 'Failed to replace meal', error: err.message });
+  }
+});
+
 // Share a plan to a dietician (user triggers)
 app.post('/api/diet-plans/:planId/share', async (req, res) => {
   try {

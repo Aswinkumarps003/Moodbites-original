@@ -1,0 +1,5 @@
+Flask
+requests
+pytesseract
+Pillow
+pdf2image

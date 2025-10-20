@@ -14,8 +14,10 @@ const A = process.env.hi;
 console.log(API_KEY);
 
 // Middleware
+// In server.js:
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  // Add your Vercel frontend URL
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://moodbites-frontend.vercel.app'],
   credentials: true
 }));
 app.use(express.json());
@@ -143,6 +145,35 @@ app.get('/api/recipes/autocomplete', async (req, res) => {
   } catch (error) {
     console.error('Error in autocomplete search:', error);
     res.status(500).json({ error: 'Failed to autocomplete search', details: error.message });
+  }
+});
+
+// Get recipes by ingredients (for FridgeScanner)
+app.get('/api/spoonacular/recipes/by-ingredients', async (req, res) => {
+  try {
+    const { ingredients, number = 6 } = req.query;
+    
+    if (!ingredients) {
+      return res.status(400).json({ 
+        error: 'Ingredients parameter is required' 
+      });
+    }
+
+    console.log(`🥗 Recipe request by ingredients: ${ingredients}`);
+    console.log(`📊 Number of recipes requested: ${number}`);
+
+    // Use the findByIngredients method from RecipeService
+    const ingredientList = ingredients.split(',').map(ing => ing.trim());
+    const recipes = await recipeService.findByIngredientsDirect(ingredientList, parseInt(number));
+    
+    res.json(recipes);
+    
+  } catch (error) {
+    console.error('❌ Error in /api/spoonacular/recipes/by-ingredients:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch recipes by ingredients',
+      message: error.message 
+    });
   }
 });
 

@@ -24,7 +24,15 @@ const app = express();
 const server = http.createServer(app);
 
 // Use CORS middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://moodbites-frontend.vercel.app',
+    'https://moodbites-frontend-eyjvu60bc-aswin-kumar-p-ss-projects.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -165,8 +173,14 @@ const Conversation = mongoose.model("Conversation", conversationSchema);
 // Set up Socket.IO
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL,
-    methods: ['GET', 'POST']
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'https://moodbites-frontend.vercel.app',
+      'https://moodbites-frontend-eyjvu60bc-aswin-kumar-p-ss-projects.vercel.app'
+    ],
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 

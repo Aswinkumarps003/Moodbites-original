@@ -8,12 +8,26 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'https://moodbites-frontend.vercel.app',
+      'https://moodbites-frontend-eyjvu60bc-aswin-kumar-p-ss-projects.vercel.app'
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://moodbites-frontend.vercel.app',
+    'https://moodbites-frontend-eyjvu60bc-aswin-kumar-p-ss-projects.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3007;

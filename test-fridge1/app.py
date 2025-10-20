@@ -14,7 +14,7 @@ except Exception as e:
 # --- FIX: Simplified Flask app setup ---
 # Serves files from the same directory where the script is run.
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://moodbites-frontend.vercel.app","http://localhost:3000"])
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'best.pt')
 model = None
@@ -98,17 +98,14 @@ def predict():
         return jsonify({'error': str(e)}), 500
 
 
-# --- FIX: Serves index.html from the current directory ---
-@app.get('/')
-def index():
-    return send_from_directory('.', 'index.html')
 
 if __name__ == '__main__':
-    # Eager load model at startup; if it fails, endpoint will attempt lazy load
     try:
         load_model()
     except Exception as e:
-        print(f'⚠️  Model preload failed: {e}. Will attempt lazy load on first request.')
-    app.run(host='0.0.0.0', port=4010, debug=True)
+        print(f"⚠️ Model preload failed: {e}. Will attempt lazy load on first request.")
+    port = int(os.environ.get("PORT", 4010))
+    app.run(host='0.0.0.0', port=port, debug=True)
+
 
     

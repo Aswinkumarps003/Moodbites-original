@@ -282,6 +282,26 @@ app.get('/api/blood-report/latest/:userId', async (req, res) => {
 });
 
 // Start server
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    service: 'blood-report-service', 
+    timestamp: new Date().toISOString(),
+    message: 'Blood Report Service is running successfully!'
+  });
+});
+
+// Health check endpoint for /health
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    service: 'blood-report-service', 
+    timestamp: new Date().toISOString(),
+    message: 'Blood Report Service is healthy!'
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`🩸 Blood Report Service running on port ${PORT}`);
 });

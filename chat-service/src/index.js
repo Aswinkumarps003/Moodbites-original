@@ -17,14 +17,27 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'https://moodbites-frontend.vercel.app',
+      'https://moodbites-frontend-eyjvu60bc-aswin-kumar-p-ss-projects.vercel.app'
+    ],
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://moodbites-frontend.vercel.app',
+    'https://moodbites-frontend-eyjvu60bc-aswin-kumar-p-ss-projects.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Configure Cloudinary (optional uploads)

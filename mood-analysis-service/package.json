@@ -9,16 +9,15 @@
     "dev": "node --watch server.js",
     "test": "node testRecipes.js",
     "test-comprehensive": "node testComprehensiveService.js",
-    "test-api": "node testApiKey.js",
-    "fastapi": "python app.py"
+    "test-api": "node testApiKey.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
-    "dotenv": "^16.6.1",
     "nodemon": "^3.1.10"
   },
   "keywords": [

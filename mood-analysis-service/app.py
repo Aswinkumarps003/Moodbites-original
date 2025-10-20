@@ -4,11 +4,11 @@ from transformers import pipeline
 
 # Create a FastAPI application
 app = FastAPI()
-
+FRONTEND_URL = "https://moodbites-frontend.vercel.app"
 # Add CORS middleware to allow frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Frontend URLs
+    allow_origins=["http://localhost:5173", "http://localhost:3000", FRONTEND_URL],  # Frontend URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -258,6 +258,99 @@ class RecipeService {
   }
 
   /**
+   * Find recipes by ingredients directly (for FridgeScanner)
+   * @param {Array} ingredients - List of ingredient names
+   * @param {number} number - Number of recipes to return
+   * @returns {Array} Array of recipes
+   */
+  async findByIngredientsDirect(ingredients, number = 6) {
+    try {
+      if (!this.apiKey) {
+        console.log('⚠️ No Spoonacular API key, returning mock recipes');
+        return this.getMockRecipesByIngredients(ingredients, number);
+      }
+
+      const ingredientsString = ingredients.join(',');
+      const params = new URLSearchParams({
+        ingredients: ingredientsString,
+        number: number,
+        apiKey: this.apiKey,
+        ranking: '2', // maximize used ingredients
+        ignorePantry: 'true'
+      });
+
+      const url = `${this.baseUrl}/recipes/findByIngredients?${params}`;
+      console.log(`🔍 Fetching recipes from Spoonacular for ingredients: ${ingredientsString}`);
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`Find by ingredients error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const recipes = data.map(recipe => this.transformRecipe(recipe, 'neutral'));
+      
+      console.log(`✅ Found ${recipes.length} recipes for ingredients: ${ingredientsString}`);
+      return recipes;
+      
+    } catch (error) {
+      console.error('❌ Error in findByIngredientsDirect:', error);
+      // Return mock recipes as fallback
+      return this.getMockRecipesByIngredients(ingredients, number);
+    }
+  }
+
+  /**
+   * Get mock recipes for ingredients (fallback)
+   * @param {Array} ingredients - List of ingredient names
+   * @param {number} number - Number of recipes to return
+   * @returns {Array} Array of mock recipes
+   */
+  getMockRecipesByIngredients(ingredients, number) {
+    const mockRecipes = [
+      {
+        id: 1,
+        title: `Fresh ${ingredients[0]} Salad`,
+        readyInMinutes: 15,
+        calories: 150,
+        image: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80",
+        usedIngredientCount: Math.min(ingredients.length, 3),
+        missedIngredientCount: 2,
+        totalIngredients: 5,
+        summary: `A refreshing salad made with ${ingredients.join(', ')} and fresh greens.`,
+        instructions: [`Wash and prepare ${ingredients[0]}`, `Mix with other ingredients`, `Serve fresh`]
+      },
+      {
+        id: 2,
+        title: `${ingredients[0]} Stir Fry`,
+        readyInMinutes: 25,
+        calories: 280,
+        image: "https://images.unsplash.com/photo-1540420773420-3366772f4999?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80",
+        usedIngredientCount: Math.min(ingredients.length, 4),
+        missedIngredientCount: 1,
+        totalIngredients: 6,
+        summary: `Quick and healthy stir fry featuring ${ingredients.join(', ')}.`,
+        instructions: [`Heat oil in pan`, `Add ${ingredients[0]}`, `Stir fry until tender`, `Season and serve`]
+      },
+      {
+        id: 3,
+        title: `Roasted ${ingredients[0]} Medley`,
+        readyInMinutes: 35,
+        calories: 220,
+        image: "https://images.unsplash.com/photo-1511690743698-d9d85f2fbf38?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80",
+        usedIngredientCount: Math.min(ingredients.length, 3),
+        missedIngredientCount: 2,
+        totalIngredients: 5,
+        summary: `Delicious roasted vegetables including ${ingredients.join(', ')}.`,
+        instructions: [`Preheat oven`, `Cut ${ingredients[0]}`, `Roast until golden`, `Serve warm`]
+      }
+    ];
+
+    return mockRecipes.slice(0, number).map(recipe => this.transformRecipe(recipe, 'neutral'));
+  }
+
+  /**
    * Find by Ingredients - Based on mood-appropriate ingredients
    */
   async findByIngredients(moodConfig, preferences, mood) {

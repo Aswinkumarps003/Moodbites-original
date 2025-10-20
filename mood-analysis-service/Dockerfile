@@ -20,4 +20,4 @@ COPY app.py .
 EXPOSE 8000
 
 # Let Render inject the $PORT variable
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "$PORT"]
+CMD uvicorn app:app --host 0.0.0.0 --port $PORT

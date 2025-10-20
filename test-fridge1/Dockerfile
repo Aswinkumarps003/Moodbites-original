@@ -28,4 +28,4 @@ COPY index.html .
 
 EXPOSE 4010
 
-CMD ["gunicorn", "--bind", "0.0.0.0:4010", "--timeout", "120", "app:app"]
+CMD gunicorn --bind 0.0.0.0:$PORT --timeout 120 app:app

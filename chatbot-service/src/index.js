@@ -37,7 +37,7 @@ function getMoodbitesModel() {
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: ['http://localhost:5173', 'http://localhost:3000','https://moodbites-frontend.vercel.app'],
   credentials: true
 }));
 app.use(express.json());
@@ -60,6 +60,7 @@ async function detectIntent(userMessage) {
     }
 
     const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+
 
     const systemPrompt = `You are an intent classifier for a food & mood assistant. 
     Your task is to label the user input as one of:
@@ -361,7 +362,7 @@ Instructions:
 
 Remember: You're not just a food bot - you're a caring friend who understands the connection between food and emotions.`;
 
-    const model = gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = gemini.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const result = await model.generateContent([
       prompt
     ]);
@@ -424,10 +425,13 @@ function generateFallbackResponse(userMessage, intent, recipes) {
   }
 }
 
+// Environment variables for service URLs
+const MOOD_SERVICE_URL = process.env.MOOD_SERVICE_URL || 'http://localhost:8000';
+
 // Detect mood using your existing FastAPI service
 async function detectMood(text) {
   try {
-    const response = await fetch('http://localhost:8000/detect-mood', {
+    const response = await fetch(`${MOOD_SERVICE_URL}/detect-mood`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -593,6 +597,7 @@ app.listen(PORT, () => {
   console.log(`💬 Chat endpoint: http://localhost:${PORT}/api/chat`);
   console.log(`🔄 Complete flow: http://localhost:${PORT}/api/complete-flow`);
   console.log(`📱 Frontend can connect from: http://localhost:5173 or http://localhost:3000`);
+  console.log(`🎭 Mood service URL: ${MOOD_SERVICE_URL}`);
   
   if (!process.env.GEMINI_API_KEY) {
     console.log(`⚠️  GEMINI_API_KEY not set - using fallback responses`);
